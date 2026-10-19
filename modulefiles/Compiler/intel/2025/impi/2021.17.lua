@@ -49,6 +49,10 @@ local i_mpi_library_kind=os.getenv("I_MPI_LIBRARY_KIND") or "release"
 
 -- New vars
 setenv("I_MPI_ROOT", root)
+setenv("MPIROOT", root)
+setenv("MPICC", "mpiicx")
+setenv("MPICXX", "mpiicpx")
+setenv("MPIFC", "mpiifx")
 
 -- PATH
 prepend_path("PATH", pathJoin(root, "bin"))
@@ -89,3 +93,10 @@ then
    prepend_path("LIBRARY_PATH", pathJoin(fabric, "lib"))
    prepend_path("LD_LIBRARY_PATH", pathJoin(fabric, "lib"))
 end
+
+-- Library installation paths, also available before a build is installed.
+setenv("GRF_" .. pkgname:upper() .. "ROOT", root)
+setenv("GRF_" .. pkgname:upper() .. "INC", pathJoin(root, "include"))
+setenv("GRF_" .. pkgname:upper() .. "LIB", pathJoin(root, "lib"))
+setenv("GRF_" .. pkgname:upper() .. "BIN", pathJoin(root, "bin"))
+setenv("GRF_" .. pkgname:upper() .. "_VERSION", version)

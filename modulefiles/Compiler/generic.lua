@@ -13,11 +13,17 @@ local root = pathJoin(rootapps, compilerD, pkgnamever)
 local system = compiler:match("^gcc/") ~= nil
 local libdir
 if system then
-  root = pkgname == "gidpost" and "/usr/local" or "/usr"
+  if pkgname == "gidpost" then
+    local manifest = io.open("/usr/local/share/hofem/gidpost/gnu-" .. version .. ".prefix", "r")
+    if manifest then
+      root = manifest:read("*l")
+      manifest:close()
+    end
+  else
+    root = "/usr"
+  end
   local multiarch = capture("gcc -print-multiarch"):gsub("%s+", "")
   libdir = root == "/usr" and pathJoin(root, "lib", multiarch) or pathJoin(root, "lib")
-elseif mode() == "load" and not isDir(root) then
-  LmodError("Library build is unavailable: " .. root)
 end
 local bin = pathJoin(root, "bin")
 local lib = libdir or pathJoin(root, "lib")
@@ -41,4 +47,4 @@ setenv("GRF_" .. pkgname:upper() .. "BIN", bin)
 setenv("GRF_" .. pkgname:upper() .. "_VERSION", version)
 
 -- LD_LIBRARY_PATH why not?
-if not system then prepend_path("LD_LIBRARY_PATH", lib) end
+if not system or pkgname == "gidpost" then prepend_path("LD_LIBRARY_PATH", lib) end

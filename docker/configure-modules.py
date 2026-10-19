@@ -10,7 +10,6 @@ import sys
 
 ROOT = Path("/opt/modulefiles")
 SOURCE = Path("/usr/local/share/hofem/modulefiles")
-INTEL = Path("/opt/intel/oneapi")
 
 
 def query(package, field="Version"):
@@ -32,33 +31,50 @@ def link(relative, template):
     target.symlink_to(os.path.relpath(ROOT / template, target.parent))
 
 
+def remove_library_links(root):
+    # Preserve compiler/MPI aliases and all directories and generic modulefiles.
+    for path in root.rglob("*.lua"):
+        if path.is_symlink() and path.resolve().name == "generic.lua":
+            path.unlink()
+
+
 def configure_gnu():
     shutil.copytree(SOURCE, ROOT, dirs_exist_ok=True, symlinks=True)
+    remove_library_links(ROOT)
+    remove_library_links(SOURCE)
     compiler = subprocess.check_output(["gfortran", "-dumpfullversion"], text=True).strip()
     compiler_root = f"Compiler/gcc/{compiler.split('.')[0]}"
     mpi = version("libopenmpi-dev")
     mpi_root = f"MPI/gcc/{compiler.split('.')[0]}/openmpi/{mpi.split('.')[0]}"
     link(f"Core/gfortran/{compiler}.lua", "templates/gfortran.lua")
     link(f"{compiler_root}/openmpi/{mpi}.lua", "templates/openmpi.lua")
-    serial = {
-        "metis": "libmetis-dev", "arpack": "libarpack2-dev",
-        "scotch": "libscotch-dev", "openblas": "libopenblas-openmp-dev",
-        "lapack": "liblapack-dev",
-    }
-    parallel = {
-        "parmetis": "libparmetis-dev", "parpack": "libparpack2-dev",
-        "ptscotch": "libptscotch-dev", "mumps": "libmumps-dev",
-        "scalapack": "libscalapack-openmpi-dev",
-    }
-    for name, package in serial.items():
-        link(f"{compiler_root}/{name}/{version(package)}.lua", "Compiler/generic.lua")
-    for name, package in parallel.items():
-        link(f"{mpi_root}/{name}/{version(package)}.lua", "MPI/generic.lua")
-    header = Path("/usr/local/include/gidpost.h").read_text()
-    gidpost = ".".join(re.search(r"#define GP_VERSION_" + part + r"\s+(\d+)", header)[1]
-                       for part in ("MAJOR", "MINOR"))
-    link(f"{compiler_root}/gidpost/{gidpost}.lua", "Compiler/generic.lua")
+    (ROOT / mpi_root).mkdir(parents=True, exist_ok=True)
     (ROOT / "gnu.toolchain").write_text(f"{compiler}\t{mpi}\n")
+
+
+def configure_gidpost():
+    # The derived image adds only modules for libraries it actually installs.
+    releases = os.environ.get("GIDPOST_VERSIONS", "2.14 2.9").split()
+    gnu, _ = (ROOT / "gnu.toolchain").read_text().split()
+    majors = {"gcc/" + gnu.split(".")[0]}
+    for profile in Path("/usr/local/share/hofem/intel").glob("*.toolchain"):
+        compiler, _, _ = profile.read_text().split()
+        majors.add("intel/" + compiler.split(".")[0])
+    for compiler in sorted(majors):
+        for release in releases:
+            link(f"Compiler/{compiler}/gidpost/{release}.lua", "Compiler/generic.lua")
+
+
+def configure_arpack():
+    gnu, mpi = (ROOT / "gnu.toolchain").read_text().split()
+    major = gnu.split(".")[0]
+    link(f"Compiler/gcc/{major}/arpack/97.lua", "Compiler/generic.lua")
+    link(f"MPI/gcc/{major}/openmpi/{mpi.split('.')[0]}/parpack/97.lua", "MPI/generic.lua")
+    for profile in Path("/usr/local/share/hofem/intel").glob("*.toolchain"):
+        compiler, mpi, _ = profile.read_text().split()
+        major = compiler.split(".")[0]
+        link(f"Compiler/intel/{major}/arpack/97.lua", "Compiler/generic.lua")
+        link(f"MPI/intel/{major}/impi/{mpi.split('.')[0]}/parpack/97.lua", "MPI/generic.lua")
 
 
 def configure_intel(compiler, mpi, mkl):
@@ -86,51 +102,32 @@ def configure_intel(compiler, mpi, mkl):
     ):
         path, source = f"{target}/{name}/{release}.lua", f"{base}/{name}/{template}.lua"
         if path != source:
-            link(path, source)
+            if name == "impi":
+                link(path, source)
+            else:
+                # Compiler dependencies remain available without library symlinks.
+                destination = ROOT / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.is_symlink():
+                    destination.unlink()
+                shutil.copyfile(ROOT / source, destination)
     (ROOT / f"MPI/intel/{major}/impi/{mpi.split('.')[0]}").mkdir(parents=True, exist_ok=True)
 
 
-def hide_unavailable():
-    # Preserve reference modulefiles/symlinks without advertising absent builds.
-    search_roots = [ROOT / "Core", *ROOT.glob("Compiler/intel/*"),
-                    *ROOT.glob("MPI/intel/*/impi/*")]
-    for search_root in search_roots:
-        hidden = []
-        for path in sorted(search_root.rglob("*.lua")):
-            if path.name.startswith("."):
-                continue
-            relative = path.relative_to(search_root).with_suffix("")
-            parts = path.relative_to(ROOT).parts
-            release = path.stem
-            if parts[:2] == ("Core", "oneapi"):
-                prefix = INTEL / parts[2] / release
-            elif parts[:2] == ("Compiler", "intel"):
-                name = parts[3]
-                if name in ("tbb", "mkl", "umf", "impi"):
-                    component = "mpi" if name == "impi" else name
-                    series = ".".join(release.split(".")[:2]) if name == "umf" else release
-                    prefix = INTEL / component / series
-                    if name == "umf" and prefix.exists() and release != version(f"intel-oneapi-umf-{series}"):
-                        hidden.append(str(relative))
-                        continue
-                else:
-                    prefix = Path(f"/opt/intel-{parts[2]}") / name / release
-            elif parts[:2] == ("MPI", "intel"):
-                prefix = Path(f"/opt/intel-{parts[2]}/impi-{parts[4]}") / parts[5] / release
-            else:
-                continue
-            if not prefix.is_dir():
-                hidden.append(str(relative))
-        (search_root / ".modulerc.lua").write_text(
-            "-- Modules for reference builds absent from this image.\n" +
-            "".join(f'hide_version("{name}")\n' for name in hidden)
-        )
+def unhide_all():
+    # Modules also define installation prefixes before their libraries are built.
+    for path in ROOT.rglob(".modulerc.lua"):
+        path.unlink()
 
 
 if sys.argv[1] == "gnu":
     configure_gnu()
+elif sys.argv[1] == "gidpost":
+    configure_gidpost()
+elif sys.argv[1] == "arpack":
+    configure_arpack()
 elif sys.argv[1] == "intel":
     configure_intel(*sys.argv[2:5])
 else:
-    raise SystemExit("Usage: hofem-configure-modules gnu | intel COMPILER MPI MKL")
-hide_unavailable()
+    raise SystemExit("Usage: hofem-configure-modules gnu | intel COMPILER MPI MKL | gidpost | arpack")
+unhide_all()

@@ -2,28 +2,41 @@
 
 ## Project Structure & Module Organization
 
-This repository is intended to provide a Docker-based development environment for HOFEM, GREMA’s electromagnetic solver using High Order Finite Elements. Currently, `README.md` is the only project file; no Dockerfile, application source, tests, or assets have been added.
+`Dockerfile` defines the `grema-dev` toolchain base. `Dockerfile.hofem` extends its complete three-stack image with HOFEM libraries. Keep library compilation out of the base.
 
-The README lists the intended toolchain: Intel compilers, MKL, Intel MPI, Lmod, Gfortran, OpenMPI, and numerical libraries including METIS, ARPACK, MUMPS, and related parallel variants. Keep environment setup here and document any external HOFEM source checkout separately.
+`docker/` contains installation scripts and bundled sources; `modulefiles/` contains compiler/MPI modules, generic templates, and reference library links. The base preserves the hierarchy and templates without generic library symlinks; the derived image adds links for its libraries. `tests/` contains smoke tests. HOFEM application sources are maintained separately.
 
 ## Build, Test, and Development Commands
 
-No build, run, or test commands are currently configured. When adding a Dockerfile, document its exact build command, required build context, and runtime options in the README’s `Usage` section. For example, a root Dockerfile could support `docker build -t hofem-dev .`.
+From the repository root, when builds are authorized:
 
-Document bind mounts in `Volumes`, installed versions in `Tools installed`, and known constraints in `Issues & limitations`. Do not describe proposed commands as working until verified.
+- `docker build -t grema-dev .`: build the complete toolchain base.
+- `docker build -f Dockerfile.hofem -t hofem-dev .`: add libraries to that base.
+- `docker run --rm grema-dev grema-smoke-test`: test the base.
+- `docker run --rm hofem-dev hofem-smoke-test`: test toolchains and libraries.
 
-## Coding Style & Naming Conventions
+The README documents migration using existing compiler layers and bind mounts. Do not describe unverified commands as tested.
 
-Use descriptive filenames and consistent indentation within each file. For new Dockerfiles, use uppercase instructions and group related dependency installation steps. For shell scripts, include an explicit interpreter and quote variable expansions. Keep Markdown headings descriptive and commands in fenced code blocks. No formatter or linter is configured.
+## Coding Style & Library Builds
+
+Use consistent indentation, uppercase Dockerfile instructions, explicit shell interpreters, and quoted variable expansions. No formatter is configured.
+
+Compile all source-built C, C++, and Fortran code, static libraries, and validation programs with `-fPIC`. For CMake, enable `CMAKE_POSITION_INDEPENDENT_CODE` and set language flags explicitly. Distribution packages retain upstream settings.
+
+For every source-built library and compiler stack, always generate the static library (`.a`) and, when supported, the shared library (`.so`). Preserve both in the installation prefix; document limitations preventing shared builds.
+
+Before building for GNU, check whether the requested library version is already available in the image. Reuse it instead of rebuilding. Generation requirements apply only when source builds are needed.
+
+After successful compilation and validation, update `docker/` and `Dockerfile.hofem` for the next image build. Preserve GNU reuse, library variants, and PIC flags. Defer image builds until explicitly requested.
 
 ## Testing Guidelines
 
-No test framework or coverage requirement exists yet. For environment changes, verify a clean image build and smoke-test affected compilers, MPI tools, and libraries inside the container. Record commands and results in the pull request, including any unavailable licensed dependencies.
+Test affected compilers, MPI tools, modules, and static/shared libraries inside containers. Use existing images for compilation checks unless image builds are requested. Record validation and limitations.
 
 ## Commit & Pull Request Guidelines
 
-There is no commit history establishing a message convention. Use concise, imperative subjects such as `Add GNU compiler environment`. Keep changes focused. Pull requests should explain the purpose, configuration changes, validation performed, and any related issue.
+Use concise, imperative commit subjects. Keep changes focused. Pull requests should explain the purpose, configuration changes, validation, and related issues.
 
 ## Security & Configuration Tips
 
-Keep credentials, compiler license files, and machine-specific paths out of version control and image layers. Document required external configuration without including secrets.
+Keep credentials, license files, and machine-specific paths out of version control and image layers.

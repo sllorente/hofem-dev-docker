@@ -30,6 +30,10 @@ end
 -- New vars
 unsetenv("INTEL_TARGET_ARCH_IA32")
 setenv("CMPLR_ROOT", cmplr_root)
+setenv("CC", "icx")
+setenv("CXX", "icpx")
+setenv("FC", "ifx")
+setenv("F77", "ifx")
 
 -- Load dependencies
 depends_on("tbb")

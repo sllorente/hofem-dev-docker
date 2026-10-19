@@ -54,3 +54,10 @@ prepend_path("NLSPATH",pathJoin(root, "share", "locale/%l_%t/%N"))
 -- others
 prepend_path("CMAKE_PREFIX_PATH", pathJoin(root, "lib/cmake"))
 
+
+-- Library installation paths, also available before a build is installed.
+setenv("GRF_" .. pkgname:upper() .. "ROOT", root)
+setenv("GRF_" .. pkgname:upper() .. "INC", pathJoin(root, "include"))
+setenv("GRF_" .. pkgname:upper() .. "LIB", pathJoin(root, "lib"))
+setenv("GRF_" .. pkgname:upper() .. "BIN", pathJoin(root, "bin"))
+setenv("GRF_" .. pkgname:upper() .. "_VERSION", version)

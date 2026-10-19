@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1
+# Only the full, three-stack GREMA toolchain image is supported here.
+FROM grema-dev:latest
+USER root
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+LABEL org.opencontainers.image.title="hofem-dev"
+ARG GIDPOST_VERSIONS="2.14 2.9"
+ARG BUILD_JOBS=2
+ENV GIDPOST_VERSIONS=${GIDPOST_VERSIONS}
+COPY docker/gidpost-2.14.tar.gz docker/gidpost-2.9.tar.gz /usr/local/share/hofem/sources/
+COPY docker/build-gidpost.sh /usr/local/sbin/hofem-build-gidpost
+COPY docker/install-libraries.sh /usr/local/sbin/hofem-install-libraries
+RUN bash /usr/local/sbin/hofem-install-libraries
+
+# Keep additional libraries in a separate layer so GiDPost builds remain cached.
+COPY docker/configure-modules.py /usr/local/sbin/hofem-configure-modules
+COPY docker/arpack-97.tar.gz /usr/local/share/hofem/sources/
+COPY docker/build-arpack.sh /usr/local/sbin/hofem-build-arpack
+COPY docker/install-arpack.sh /usr/local/sbin/hofem-install-arpack
+RUN bash /usr/local/sbin/hofem-install-arpack
+
+# METIS keeps its own build layer and reuses GNU's installed library.
+COPY docker/metis-5.1.0.tar.gz /usr/local/share/hofem/sources/
+COPY docker/build-metis.sh /usr/local/sbin/hofem-build-metis
+COPY docker/install-metis.sh /usr/local/sbin/hofem-install-metis
+RUN bash /usr/local/sbin/hofem-install-metis
+
+# ParMETIS reuses the matching METIS and GNU's existing OpenMPI build.
+COPY modulefiles/MPI/generic.lua /opt/modulefiles/MPI/generic.lua
+COPY modulefiles/MPI/generic.lua /usr/local/share/hofem/modulefiles/MPI/generic.lua
+COPY docker/parmetis-4.0.3.tar.gz /usr/local/share/hofem/sources/
+COPY docker/build-parmetis.sh /usr/local/sbin/hofem-build-parmetis
+COPY docker/install-parmetis.sh /usr/local/sbin/hofem-install-parmetis
+RUN bash /usr/local/sbin/hofem-install-parmetis
+
+# Threaded Scotch/PT-Scotch; existing numerical-library layers stay cached.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        flex bison libbz2-dev liblzma-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY docker/scotch-v7.0.10.tar.gz /usr/local/share/hofem/sources/
+COPY docker/build-scotch.sh /usr/local/sbin/hofem-build-scotch
+COPY docker/install-scotch.sh /usr/local/sbin/hofem-install-scotch
+RUN bash /usr/local/sbin/hofem-install-scotch
+
+# MUMPS uses the loaded ordering modules and matching oneMKL cluster payloads.
+COPY docker/install-mumps-deps.sh /usr/local/sbin/hofem-install-mumps-deps
+RUN bash /usr/local/sbin/hofem-install-mumps-deps
+COPY docker/MUMPS_5.7.3.tar.gz /usr/local/share/hofem/sources/
+COPY docker/build-mumps.sh /usr/local/sbin/hofem-build-mumps
+COPY docker/install-mumps.sh /usr/local/sbin/hofem-install-mumps
+RUN bash /usr/local/sbin/hofem-install-mumps
+
+COPY tests/smoke.sh /usr/local/bin/hofem-smoke-test
+COPY tests/arpack.sh /usr/local/bin/hofem-arpack-test
+COPY tests/arpack.f90 /usr/local/share/hofem/tests/arpack.f90
+COPY tests/metis.sh /usr/local/bin/hofem-metis-test
+COPY tests/metis.c /usr/local/share/hofem/tests/metis.c
+COPY tests/parmetis.sh /usr/local/bin/hofem-parmetis-test
+COPY tests/parmetis.c /usr/local/share/hofem/tests/parmetis.c
+COPY tests/scotch.sh /usr/local/bin/hofem-scotch-test
+COPY tests/scotch.c tests/scotch.f90 /usr/local/share/hofem/tests/
+COPY tests/mumps.sh /usr/local/bin/hofem-mumps-test
+COPY tests/mumps.c tests/mumps.f90 /usr/local/share/hofem/tests/
+RUN chmod 755 /usr/local/bin/hofem-scotch-test /usr/local/bin/hofem-smoke-test /usr/local/bin/hofem-arpack-test \
+    /usr/local/bin/hofem-metis-test /usr/local/bin/hofem-parmetis-test /usr/local/bin/hofem-mumps-test
+USER developer

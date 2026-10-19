@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+ARG TOOLCHAIN_IMAGE=hofem-dev:latest
 FROM ubuntu:24.04 AS gnu-dev
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -18,43 +19,12 @@ RUN apt-get update \
         zlib1g-dev libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ARG GIDPOST_VERSION=2.14
-ARG GIDPOST_SHA256=43a3d907558503b3248abe6d61e39f1d45430ac98573489af25cbff5e8e82f37
-ARG BUILD_JOBS=2
-
-# Build GiDPost from its official release, including its Fortran C bindings.
-RUN curl -fsSL --retry 3 \
-        "https://downloads.gidsimulation.com/Tools/gidpost/gidpost-${GIDPOST_VERSION}.zip" \
-        -o /tmp/gidpost.zip \
-    && printf '%s  %s\n' "${GIDPOST_SHA256}" /tmp/gidpost.zip | sha256sum -c - \
-    && unzip -q /tmp/gidpost.zip -d /tmp \
-    # Upstream 2.14 finds HDF5 HL but omits it from the library link dependencies.
-    && printf '\ntarget_link_libraries(gidpost ${HDF5_HL_LIBRARIES})\n' \
-        >> "/tmp/gidpost-${GIDPOST_VERSION}/source/CMakeLists.txt" \
-    && cmake -S "/tmp/gidpost-${GIDPOST_VERSION}" -B /tmp/gidpost-build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DCMAKE_C_FLAGS=-DgFortran \
-        -DCMAKE_SHARED_LINKER_FLAGS=-Wl,--no-undefined \
-        -DENABLE_HDF5=ON \
-        -DENABLE_SHARED_LIBS=ON \
-        -DENABLE_EXAMPLES=OFF \
-        -DENABLE_FORTRAN_EXAMPLES=OFF \
-    && cmake --build /tmp/gidpost-build --parallel "${BUILD_JOBS}" \
-    && cmake --install /tmp/gidpost-build \
-    && install -D -m 644 "/tmp/gidpost-${GIDPOST_VERSION}/fortran_module/gidpost_interface.f90" \
-        /usr/local/share/gidpost/gidpost_interface.f90 \
-    && install -D -m 644 "/tmp/gidpost-${GIDPOST_VERSION}/LICENSE" \
-        /usr/local/share/licenses/gidpost/LICENSE \
-    && ldconfig \
-    && rm -rf /tmp/gidpost.zip "/tmp/gidpost-${GIDPOST_VERSION}" /tmp/gidpost-build
-
 COPY modulefiles/ /usr/local/share/hofem/modulefiles/
 COPY docker/configure-modules.py /usr/local/sbin/hofem-configure-modules
 RUN python3 /usr/local/sbin/hofem-configure-modules gnu
 COPY docker/entrypoint.sh /usr/local/bin/hofem-entrypoint
-COPY tests/smoke.sh /usr/local/bin/hofem-smoke-test
-RUN chmod 755 /usr/local/bin/hofem-entrypoint /usr/local/bin/hofem-smoke-test \
+COPY tests/toolchains.sh /usr/local/bin/grema-smoke-test
+RUN chmod 755 /usr/local/bin/hofem-entrypoint /usr/local/bin/grema-smoke-test \
     && useradd --create-home --uid 10001 --shell /bin/bash developer \
     && mkdir -p /workspace \
     && chown developer:developer /workspace \
@@ -64,6 +34,20 @@ WORKDIR /workspace
 USER developer
 ENTRYPOINT ["/usr/local/bin/hofem-entrypoint"]
 CMD ["/bin/bash"]
+
+# Migration target: reuse installed compilers when rebuilding their layers is costly.
+# Pin TOOLCHAIN_IMAGE to an existing image ID when building this target.
+FROM ${TOOLCHAIN_IMAGE} AS reuse-toolchains
+USER root
+COPY modulefiles/ /usr/local/share/hofem/modulefiles/
+COPY docker/configure-modules.py /usr/local/sbin/hofem-configure-modules
+COPY docker/install-intel.sh /usr/local/sbin/hofem-install-intel
+COPY docker/prepare-base.sh /usr/local/sbin/grema-prepare-base
+COPY tests/toolchains.sh /usr/local/bin/grema-smoke-test
+RUN bash /usr/local/sbin/grema-prepare-base \
+    && chmod 755 /usr/local/bin/grema-smoke-test
+LABEL org.opencontainers.image.title="grema-dev"
+USER developer
 
 FROM gnu-dev AS intel-base
 USER root
@@ -85,8 +69,10 @@ RUN bash /usr/local/sbin/hofem-install-intel 2025.3 2025.3 2021.17 2025.3
 USER developer
 
 FROM intel-2025 AS development
+LABEL org.opencontainers.image.title="grema-dev"
 USER root
 # Resolve current release series from APT metadata, then install payload packages.
-RUN bash /usr/local/sbin/hofem-install-intel latest
+RUN bash /usr/local/sbin/hofem-install-intel latest \
+    && touch /usr/local/share/hofem/three-stacks
 
 USER developer

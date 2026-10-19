@@ -1,54 +1,10 @@
 #!/bin/bash
 set -eo pipefail
-
+grema-smoke-test --with-libraries
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 cd "$test_dir"
-
 source /etc/profile.d/lmod.sh
-module --version
-module purge
-test "$MODULEPATH" = "$MODULEPATH_ROOT/Core"
-test -z "$(find -L "$MODULEPATH_ROOT" -type l -print -quit)"
-IFS=$'\t' read -r gnu_version openmpi_version < "$MODULEPATH_ROOT/gnu.toolchain"
-gnu_major=${gnu_version%%.*}
-openmpi_major=${openmpi_version%%.*}
-module load "gfortran/$gnu_version"
-test "$MODULEPATH" = "$MODULEPATH_ROOT/Compiler/gcc/$gnu_major:$MODULEPATH_ROOT/Core"
-module load metis gidpost
-test "$GRF_METISROOT" = /usr
-test "$GRF_GIDPOSTROOT" = /usr/local
-module load "openmpi/$openmpi_version" parmetis parpack mumps
-test "$GRF_PARMETISROOT" = /usr
-test "$GRF_PARPACKROOT" = /usr
-test "$GRF_MUMPSROOT" = /usr
-test "$MODULEPATH" = "$MODULEPATH_ROOT/MPI/gcc/$gnu_major/openmpi/$openmpi_major:$MODULEPATH_ROOT/Compiler/gcc/$gnu_major:$MODULEPATH_ROOT/Core"
-
-# Compile and run OpenMP, MPI, and numerical-library links together.
-cat > gnu.f90 <<'EOF'
-program smoke
-  use mpi
-  use omp_lib
-  implicit none
-  integer :: ierr, ranks
-  double precision :: x(2), y(2), ddot
-  external ddot
-  call MPI_Init(ierr)
-  call MPI_Comm_size(MPI_COMM_WORLD, ranks, ierr)
-  if (ranks /= 2) call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
-  if (omp_get_max_threads() < 1) call MPI_Abort(MPI_COMM_WORLD, 2, ierr)
-  x = [1.0d0, 2.0d0]
-  y = [3.0d0, 4.0d0]
-  if (abs(ddot(2, x, 1, y, 1) - 11.0d0) > 1.0d-12) &
-    call MPI_Abort(MPI_COMM_WORLD, 3, ierr)
-  call MPI_Finalize(ierr)
-end program
-EOF
-/usr/bin/mpifort.openmpi -fopenmp gnu.f90 -o gnu-smoke \
-    -Wl,--no-as-needed -lparpack -larpack -ldmumps -lmumps_common -lpord \
-    -lscalapack-openmpi -lparmetis -lmetis -lptscotch -lscotch -lopenblas
-/usr/bin/mpirun.openmpi --oversubscribe -np 2 ./gnu-smoke
-
 cat > gidpost.c <<'EOF'
 #include <gidpost.h>
 int main(void) {
@@ -61,40 +17,73 @@ int main(void) {
     return GiD_PostDone();
 }
 EOF
-gcc gidpost.c -lgidpost -o gidpost-smoke
-./gidpost-smoke
-test -s smoke.post.res
-test -s smoke.post.h5
-gfortran -c /usr/local/share/gidpost/gidpost_interface.f90
+cat > gidpost.f90 <<'EOF'
+program fortran_gidpost_smoke
+  use gidpost
+  implicit none
+  type(GiD_File) :: file
+  call GiD_PostInit()
+  file = GiD_fOpenPostResultFile("fortran.post.res", GiD_PostAscii)
+  call GiD_fClosePostResultFile(file)
+  call GiD_PostDone()
+end program
+EOF
 
-# Exercise every installed compiler/MPI hierarchy and return to Core afterward.
+check_gidpost() {
+    local c_compiler=$1
+    "$c_compiler" -fPIC -I "$GRF_GIDPOSTINC" gidpost.c -L "$GRF_GIDPOSTLIB" -lgidpost -o gidpost-smoke
+    ldd ./gidpost-smoke | grep -F "$GRF_GIDPOSTLIB/libgidpost.so"
+    ./gidpost-smoke
+    test -s smoke.post.res
+    test -s smoke.post.h5
+    "$FC" -fPIC -I "$GRF_GIDPOSTINC" gidpost.f90 -L "$GRF_GIDPOSTLIB" \
+        -lgidpost_fortran -lgidpost -o fortran-gidpost-smoke
+    ./fortran-gidpost-smoke
+    test -s fortran.post.res
+    if [[ -f $GRF_GIDPOSTLIB/libgidpost.a ]]; then
+        "$c_compiler" -fPIC -I "$GRF_GIDPOSTINC" gidpost.c \
+            "$GRF_GIDPOSTLIB/libgidpost.a" $(pkg-config --libs hdf5) \
+            -lhdf5_hl -lz -lpthread -lm -o gidpost-static-smoke
+        ./gidpost-static-smoke
+        "$FC" -fPIC -I "$GRF_GIDPOSTINC" gidpost.f90 \
+            "$GRF_GIDPOSTLIB/libgidpost_fortran.a" "$GRF_GIDPOSTLIB/libgidpost.a" \
+            $(pkg-config --libs hdf5) -lhdf5_hl -lz -lpthread -lm -o fortran-static-smoke
+        ./fortran-static-smoke
+        test -s "$GRF_GIDPOSTLIB/libgidpost_fortran.so"
+        "$c_compiler" -fPIC -shared -Wl,--no-undefined \
+            -Wl,--whole-archive "$GRF_GIDPOSTLIB/libgidpost.a" -Wl,--no-whole-archive \
+            $(pkg-config --libs hdf5) -lhdf5_hl -lz -lpthread -lm -o gidpost-static-pic-check.so
+    else
+        # A reused GNU installation may predate the requirement for both variants.
+        test "$CC" = gcc
+        test "$(cat "/usr/local/share/hofem/gidpost/gnu-${GRF_GIDPOST_VERSION}.prefix")" = "$GRF_GIDPOSTROOT"
+    fi
+    # Link the complete static Fortran interface into a shared library to verify PIC.
+    "$FC" -fPIC -shared -Wl,--whole-archive "$GRF_GIDPOSTLIB/libgidpost_fortran.a" \
+        -Wl,--no-whole-archive -L "$GRF_GIDPOSTLIB" -lgidpost -o fortran-pic-check.so
+}
+
+check_versions() {
+    for gidpost_version in $GIDPOST_VERSIONS; do
+        module load "gidpost/$gidpost_version"
+        test "$GRF_GIDPOST_VERSION" = "$gidpost_version"
+        check_gidpost "$CC"
+        module unload gidpost
+    done
+}
 module purge
-test "$MODULEPATH" = "$MODULEPATH_ROOT/Core"
-for profile_file in /usr/local/share/hofem/intel/*.toolchain; do
-    [[ -f $profile_file ]] || continue
-    profile=${profile_file##*/}
-    profile=${profile%.toolchain}
-    IFS=$'\t' read -r compiler mpi mkl < "$profile_file"
-    module load "oneapi/compiler/$compiler"
-    test "$MODULEPATH" = "$MODULEPATH_ROOT/Compiler/intel/${compiler%%.*}:$MODULEPATH_ROOT/Core"
-    module load "impi/$mpi"
-    test "$MODULEPATH" = "$MODULEPATH_ROOT/MPI/intel/${compiler%%.*}/impi/${mpi%%.*}:$MODULEPATH_ROOT/Compiler/intel/${compiler%%.*}:$MODULEPATH_ROOT/Core"
-    icx --version | grep -F "${compiler}."
-    ifx --version | grep -F "${compiler}."
-    mpirun -V | grep -F "$mpi"
-    test -f "${MKLROOT}/include/mkl.h"
-    mpiifx -fiopenmp -qmkl gnu.f90 -o intel-smoke
-    I_MPI_FABRICS=shm mpirun -np 2 ./intel-smoke
-    test -e "$TBBROOT/lib/libtbb.so"
-    test -e "$UMF_ROOT/lib/libumf.so"
-    mpiicx -fiopenmp gidpost.c -lgidpost -o intel-gidpost-smoke
-    ./intel-gidpost-smoke
-    printf '#include <iostream>\n#include <oneapi/tbb/parallel_for.h>\nint main() { oneapi::tbb::parallel_for(0, 4, [](int){}); std::cout << "C++ works\\n"; }\n' > cpp.cpp
-    icpx cpp.cpp -ltbb -o intel-cpp-smoke
-    ./intel-cpp-smoke
+module load gfortran openmpi
+check_versions
+for profile in /usr/local/share/hofem/intel/*.toolchain; do
+    read -r compiler mpi mkl < "$profile"
     module purge
-    test "$MODULEPATH" = "$MODULEPATH_ROOT/Core"
+    module load "oneapi/compiler/$compiler" "impi/$mpi"
+    check_versions
 done
-test "$(command -v mpifort)" = /usr/bin/mpifort
-
-printf 'Development environment smoke tests passed.\n'
+module purge
+printf 'HOFEM GiDPost smoke tests passed.\n'
+hofem-arpack-test
+hofem-metis-test
+hofem-parmetis-test
+hofem-scotch-test
+hofem-mumps-test

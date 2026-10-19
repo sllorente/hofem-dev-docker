@@ -18,8 +18,8 @@ if system then
   root = pkgname == "gidpost" and "/usr/local" or "/usr"
   local multiarch = capture("gcc -print-multiarch"):gsub("%s+", "")
   libdir = root == "/usr" and pathJoin(root, "lib", multiarch) or pathJoin(root, "lib")
-elseif mode() == "load" and not isDir(root) then
-  LmodError("Library build is unavailable: " .. root)
+  -- Ubuntu's original ParMETIS package uses the non-multiarch library directory.
+  if pkgname == "parmetis" then libdir = pathJoin(root, "lib") end
 end
 local bin = pathJoin(root, "bin")
 local lib = libdir or pathJoin(root, "lib")
