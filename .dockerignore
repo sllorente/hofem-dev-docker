@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!docker/
+!docker/entrypoint.sh
+!docker/install-intel.sh
+!docker/configure-modules.py
+!modulefiles/
+!modulefiles/**
+!tests/
+!tests/smoke.sh
