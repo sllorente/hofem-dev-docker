@@ -1,15 +1,19 @@
 #!/bin/bash
 set -eo pipefail
-# Refuse GNU-only and single-Intel bases before compiling any libraries.
-test -f /usr/local/share/hofem/three-stacks
-test -f /usr/local/share/hofem/intel/2025.3.toolchain
-test -f /usr/local/share/hofem/intel/latest.toolchain
+# Require GNU and at least one Intel profile; build only the installed stacks.
+test -s /opt/modulefiles/gnu.toolchain
 python3 - <<'PY'
 from pathlib import Path
 root = Path('/usr/local/share/hofem/intel')
-compilers = { (root / (p + '.toolchain')).read_text().split()[0] for p in ('2025.3', 'latest') }
-if len(compilers) != 2:
-    raise SystemExit('hofem-dev requires two distinct Intel compiler series plus GNU')
+profiles = sorted(root.glob('*.toolchain'))
+if not profiles:
+    raise SystemExit('hofem-dev requires GNU and at least one Intel compiler/MPI profile')
+for profile in profiles:
+    compiler, mpi, mkl = profile.read_text().split()
+    for component, version in (('compiler',compiler), ('mpi',mpi), ('mkl',mkl)):
+        variables = Path('/opt/intel/oneapi')/component/version/'env/vars.sh'
+        if not variables.is_file():
+            raise SystemExit(f'{profile.name}: missing toolchain component: {variables}')
 PY
 python3 /usr/local/sbin/hofem-configure-modules gidpost
 source /etc/profile.d/lmod.sh

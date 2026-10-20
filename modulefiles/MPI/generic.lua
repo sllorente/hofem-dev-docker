@@ -11,8 +11,8 @@ local mpi        = hierA[1]
 local mpiD       = mpi:gsub("/","-")
 ---------------------------------------------
 local root = pathJoin(rootapps, compilerD, mpiD, pkgnamever)
--- Ubuntu development packages are shared by the GNU hierarchy.
-local system = compiler:match("^gcc/") ~= nil
+-- GNU MUMPS is source-built to enable all orderings; other GNU libraries reuse Ubuntu.
+local system = compiler:match("^gcc/") ~= nil and pkgname ~= "mumps"
 local libdir
 if system then
   root = pkgname == "gidpost" and "/usr/local" or "/usr"

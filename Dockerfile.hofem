@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
-# Only the full, three-stack GREMA toolchain image is supported here.
-FROM grema-dev:latest
+# Select GNU plus the Intel toolchain profiles to extend.
+ARG GREMA_IMAGE=grema-dev:latest
+FROM ${GREMA_IMAGE}
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 LABEL org.opencontainers.image.title="hofem-dev"
@@ -43,7 +44,7 @@ COPY docker/build-scotch.sh /usr/local/sbin/hofem-build-scotch
 COPY docker/install-scotch.sh /usr/local/sbin/hofem-install-scotch
 RUN bash /usr/local/sbin/hofem-install-scotch
 
-# MUMPS uses the loaded ordering modules and matching oneMKL cluster payloads.
+# MUMPS is source-built for GNU/OpenMPI and Intel MPI with all ordering modules.
 COPY docker/install-mumps-deps.sh /usr/local/sbin/hofem-install-mumps-deps
 RUN bash /usr/local/sbin/hofem-install-mumps-deps
 COPY docker/MUMPS_5.7.3.tar.gz /usr/local/share/hofem/sources/
@@ -51,7 +52,15 @@ COPY docker/build-mumps.sh /usr/local/sbin/hofem-build-mumps
 COPY docker/install-mumps.sh /usr/local/sbin/hofem-install-mumps
 RUN bash /usr/local/sbin/hofem-install-mumps
 
+# Embed PIC HDF5 into the existing GiDPost objects without rebuilding other libraries.
+COPY docker/hdf5-1.10.10.tar.gz /usr/local/share/hofem/sources/
+COPY docker/build-gidpost-hdf5.sh /usr/local/sbin/hofem-build-gidpost-hdf5
+COPY docker/embed-gidpost-hdf5.sh /usr/local/sbin/hofem-embed-gidpost-hdf5
+COPY docker/install-gidpost-hdf5.sh /usr/local/sbin/hofem-install-gidpost-hdf5
+RUN bash /usr/local/sbin/hofem-install-gidpost-hdf5
+
 COPY tests/smoke.sh /usr/local/bin/hofem-smoke-test
+COPY tests/gidpost-hdf5.sh /usr/local/bin/hofem-gidpost-hdf5-test
 COPY tests/arpack.sh /usr/local/bin/hofem-arpack-test
 COPY tests/arpack.f90 /usr/local/share/hofem/tests/arpack.f90
 COPY tests/metis.sh /usr/local/bin/hofem-metis-test
@@ -63,5 +72,6 @@ COPY tests/scotch.c tests/scotch.f90 /usr/local/share/hofem/tests/
 COPY tests/mumps.sh /usr/local/bin/hofem-mumps-test
 COPY tests/mumps.c tests/mumps.f90 /usr/local/share/hofem/tests/
 RUN chmod 755 /usr/local/bin/hofem-scotch-test /usr/local/bin/hofem-smoke-test /usr/local/bin/hofem-arpack-test \
-    /usr/local/bin/hofem-metis-test /usr/local/bin/hofem-parmetis-test /usr/local/bin/hofem-mumps-test
+    /usr/local/bin/hofem-metis-test /usr/local/bin/hofem-parmetis-test /usr/local/bin/hofem-mumps-test \
+    /usr/local/bin/hofem-gidpost-hdf5-test
 USER developer

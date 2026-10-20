@@ -16,7 +16,7 @@ check_stack() {
     modes=5
     if [[ $CC == icx ]]; then
         flags=-qopenmp
-        linkflags=(-nofor_main)
+        linkflags=(-nofor-main)
         runner=(mpirun -np 2)
         numerical=(-L "$MKLROOT/lib" -lmkl_scalapack_lp64 -lmkl_blacs_intelmpi_lp64
                    -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core)
@@ -24,10 +24,10 @@ check_stack() {
         flags=-fopenmp
         linkflags=()
         runner=(/usr/bin/mpirun.openmpi --oversubscribe -np 2)
-        numerical=(-lscalapack-openmpi -llapack -lblas)
-        # Ubuntu's existing package enables PORD but no external ordering backends.
-        modes=-1
+        numerical=(-lscalapack-openmpi -llapack -lopenblas)
     fi
+    test "$GRF_MUMPS_VERSION" = 5.7.3
+    test -f "$GRF_MUMPSROOT/share/mumps/build-config.json"
     orderings=(-L "$GRF_PARMETISLIB" -lparmetis -L "$GRF_METISLIB" -lmetis
                -L "$GRF_PTSCOTCHLIB" -lptesmumps -lptscotch -lptscotcherr
                -L "$GRF_SCOTCHLIB" -lesmumps -lscotch -lscotcherr)
@@ -43,6 +43,9 @@ check_stack() {
                 -c /usr/local/share/hofem/tests/mumps.c -o check.o
             "$MPIFC" -fPIC "$flags" "${linkflags[@]}" check.o "${mumps[@]}" "${orderings[@]}" \
                 "${numerical[@]}" -lz -lbz2 -llzma -lpthread -lm -ldl -o check
+            if [[ $variant == shared ]]; then
+                ldd ./check | grep -F "$GRF_MUMPSLIB/lib${arithmetic}mumps.so"
+            fi
             "${runner[@]}" ./check "$modes"
             if [[ $arithmetic == d ]]; then
                 "$MPIFC" -fPIC "$flags" -I "$GRF_MUMPSINC" /usr/local/share/hofem/tests/mumps.f90 \
@@ -53,32 +56,39 @@ check_stack() {
             if [[ $CC == icx ]]; then
                 ldd ./check | grep -F "$MPIROOT/" | grep 'libmpi.so'
                 ! ldd ./check | grep libmpi.so.40
+            else
+                ldd ./check | grep libmpi.so.40
+                ! ldd ./check | grep libmpi.so.12
             fi
         done
     done
-    if [[ $CC == icx ]]; then
-        "$MPIFC" -fPIC "$flags" -shared -Wl,--no-undefined -Wl,--whole-archive \
-            "$GRF_MUMPSLIB/"lib{smumps,dmumps,cmumps,zmumps,mumps_common,pord}.a \
-            -Wl,--no-whole-archive "${orderings[@]}" "${numerical[@]}" \
-            -lz -lbz2 -llzma -lpthread -lm -ldl -o all-static-pic.so
-        ! readelf -d all-static-pic.so | grep TEXTREL
-        python3 - "$GRF_MUMPSROOT" <<'PY'
+    "$MPIFC" -fPIC "$flags" -shared -Wl,--no-undefined -Wl,--whole-archive \
+        "$GRF_MUMPSLIB/"lib{smumps,dmumps,cmumps,zmumps,mumps_common,pord}.a \
+        -Wl,--no-whole-archive "${orderings[@]}" "${numerical[@]}" \
+        -lz -lbz2 -llzma -lpthread -lm -ldl -o all-static-pic.so
+    ! readelf -d all-static-pic.so | grep TEXTREL
+    python3 - "$GRF_MUMPSROOT" <<'PY'
 from pathlib import Path
 import json, os, sys
 root = Path(sys.argv[1])/'share/mumps'
 config = json.loads((root/'build-config.json').read_text())
 assert config['version'] == '5.7.3' and config['integer_bits'] == 32
-assert all(config[k] for k in ('mpi','openmp','mkl_threaded','pic','static','shared'))
+assert all(config[k] for k in ('mpi','openmp','pic','static','shared'))
 assert config['mpi_root'] == os.environ['MPIROOT']
-assert config['mkl_root'] == os.environ['MKLROOT']
+gnu = os.environ['CC'] == 'gcc'
+if gnu:
+    assert config['numerical_backend'] == 'openblas' and config['mpi_implementation'] == 'openmpi'
+    assert config['mkl_root'] is None and not config['mkl_threaded'] and not config['gemmt']
+else:
+    assert config['mkl_threaded'] and config['mkl_root'] == os.environ['MKLROOT']
 for name, prefix in config['orderings'].items():
     assert prefix == os.environ['GRF_'+name.upper()+'ROOT']
 settings = (root/'Makefile.inc').read_text().splitlines()
 for name in ('OPTC','OPTF','OPTL'):
-    assert any(line.startswith(name+' = ') and '-fPIC' in line and '-qopenmp' in line for line in settings)
-print('Verified MUMPS PIC/OpenMP settings and matching ordering/MPI/MKL prefixes')
+    assert any(line.startswith(name+' = ') and '-fPIC' in line
+               and ('-fopenmp' if gnu else '-qopenmp') in line for line in settings)
+print('Verified MUMPS PIC/OpenMP settings and matching ordering/MPI/numerical backend')
 PY
-    fi
     echo "MUMPS tests passed with $MPIFC ($GRF_MUMPS_VERSION)"
 }
 module purge

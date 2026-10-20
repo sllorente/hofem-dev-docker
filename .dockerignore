@@ -2,6 +2,10 @@
 !Dockerfile
 !Dockerfile.hofem
 !docker/
+!docker/hdf5-1.10.10.tar.gz
+!docker/build-gidpost-hdf5.sh
+!docker/embed-gidpost-hdf5.sh
+!docker/install-gidpost-hdf5.sh
 !docker/MUMPS_5.7.3.tar.gz
 !docker/build-mumps.sh
 !docker/install-mumps.sh
@@ -29,6 +33,7 @@
 !modulefiles/
 !modulefiles/**
 !tests/
+!tests/gidpost-hdf5.sh
 !tests/mumps.sh
 !tests/mumps.c
 !tests/mumps.f90

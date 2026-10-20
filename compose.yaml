@@ -1,0 +1,28 @@
+services:
+  hofem:
+    image: "hofem-dev:${IMAGE_TAG:-latest}"
+    pull_policy: never
+    platform: linux/amd64
+    hostname: "${HOFEM_HOSTNAME:-hofem-build}"
+    user: "0:0"
+    environment:
+      LOCAL_UID: "${LOCAL_UID:?Set LOCAL_UID to your host UID}"
+      LOCAL_GID: "${LOCAL_GID:?Set LOCAL_GID to your host GID}"
+      LOCAL_USER: "${LOCAL_USER:-developer}"
+    entrypoint: ["/bin/bash", "/usr/local/bin/hofem-entrypoint"]
+    command: ["/bin/bash"]
+    working_dir: /workspace
+    volumes:
+      - type: bind
+        source: ./docker/entrypoint.sh
+        target: /usr/local/bin/hofem-entrypoint
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${WORKSPACE:?Set WORKSPACE to an absolute host directory}"
+        target: /workspace
+        bind:
+          create_host_path: false
+    stdin_open: true
+    tty: true

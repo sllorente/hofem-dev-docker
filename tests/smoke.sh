@@ -42,17 +42,17 @@ check_gidpost() {
     test -s fortran.post.res
     if [[ -f $GRF_GIDPOSTLIB/libgidpost.a ]]; then
         "$c_compiler" -fPIC -I "$GRF_GIDPOSTINC" gidpost.c \
-            "$GRF_GIDPOSTLIB/libgidpost.a" $(pkg-config --libs hdf5) \
-            -lhdf5_hl -lz -lpthread -lm -o gidpost-static-smoke
+            "$GRF_GIDPOSTLIB/libgidpost.a" \
+            -lsz -lz -ldl -lpthread -lm -o gidpost-static-smoke
         ./gidpost-static-smoke
         "$FC" -fPIC -I "$GRF_GIDPOSTINC" gidpost.f90 \
             "$GRF_GIDPOSTLIB/libgidpost_fortran.a" "$GRF_GIDPOSTLIB/libgidpost.a" \
-            $(pkg-config --libs hdf5) -lhdf5_hl -lz -lpthread -lm -o fortran-static-smoke
+            -lsz -lz -ldl -lpthread -lm -o fortran-static-smoke
         ./fortran-static-smoke
         test -s "$GRF_GIDPOSTLIB/libgidpost_fortran.so"
         "$c_compiler" -fPIC -shared -Wl,--no-undefined \
             -Wl,--whole-archive "$GRF_GIDPOSTLIB/libgidpost.a" -Wl,--no-whole-archive \
-            $(pkg-config --libs hdf5) -lhdf5_hl -lz -lpthread -lm -o gidpost-static-pic-check.so
+            -lsz -lz -ldl -lpthread -lm -o gidpost-static-pic-check.so
     else
         # A reused GNU installation may predate the requirement for both variants.
         test "$CC" = gcc
@@ -82,6 +82,7 @@ for profile in /usr/local/share/hofem/intel/*.toolchain; do
 done
 module purge
 printf 'HOFEM GiDPost smoke tests passed.\n'
+hofem-gidpost-hdf5-test
 hofem-arpack-test
 hofem-metis-test
 hofem-parmetis-test

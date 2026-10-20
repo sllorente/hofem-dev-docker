@@ -8,7 +8,8 @@ The installer verifies SHA-256:
 ```
 
 The build follows `INSTALL`, `Make.inc/Makefile.inc.generic`, and
-`Make.inc/Makefile.INTEL.PAR`. It generates a stack-specific `Makefile.inc`.
+`Make.inc/Makefile.INTEL.PAR`, and `Make.inc/Makefile.debian.PAR`. It generates a
+stack-specific `Makefile.inc`.
 
 ## Configuration
 
@@ -20,8 +21,9 @@ The build follows `INSTALL`, `Make.inc/Makefile.inc.generic`, and
 | Optimization | `-O2`, without processor-specific instruction requirements |
 | Integer ABI | Default 32-bit integers, LP64 BLAS/ScaLAPACK; MUMPS retains its native 64-bit nonzero counts |
 | Orderings | PORD, METIS, ParMETIS, Scotch, PT-Scotch |
-| Numerical backend | Matching oneMKL LP64, Intel OpenMP threading, Intel-MPI BLACS and ScaLAPACK |
-| Additional definitions | `GEMMT_AVAILABLE`, `DETERMINISTIC_PARALLEL_GRAPH` |
+| Intel numerical backend | Matching oneMKL LP64, Intel OpenMP threading, Intel-MPI BLACS and ScaLAPACK |
+| GNU numerical backend | OpenMPI, OpenBLAS, LAPACK, and system ScaLAPACK/OpenMPI |
+| Additional definitions | `DETERMINISTIC_PARALLEL_GRAPH`; `GEMMT_AVAILABLE` for Intel only |
 | Scotch OpenMP thread import | Disabled; Scotch manages its own pthreads |
 
 Before compiling, the installer loads the compiler, MPI, `metis`, `parmetis`,
@@ -30,6 +32,11 @@ Intel builds use `mpiicx`/`mpiifx` and the same ordering libraries as the loaded
 compiler/MPI stack. `-Dparmetis` and `-Dptscotch` also enable their serial interfaces,
 as documented upstream. METIS/Scotch are not rebuilt. Both EsMUMPS interfaces are
 linked. C compilation explicitly includes `stdint.h` for Scotch's public types.
+
+GNU uses OpenMPI's wrappers, `-fopenmp`, and the upstream-recommended
+`-fallow-argument-mismatch` for current GFortran. No default-integer widening is
+used. The existing GNU METIS, ParMETIS, Scotch, and PT-Scotch modules supply its
+ordering dependencies; those libraries are not rebuilt for MUMPS.
 
 The base contains only oneMKL core packages. The derived image adds
 `intel-oneapi-mkl-cluster-devel-<series>` and its runtime package, pinned to the
@@ -49,10 +56,14 @@ Intel modules are generic MPI-hierarchy symlinks named `mumps/5.7.3`. Prefixes a
 libraries, public headers, compiler-specific Fortran modules, upstream examples,
 the license, `Makefile.inc`, and `share/mumps/build-config.json`.
 
-GNU reuses Ubuntu's **MUMPS 5.6.2** static/shared libraries through `mumps/5.6.2`.
-That package has PORD ordering but lacks METIS/ParMETIS/Scotch/PT-Scotch backends;
-loading those modules does not add backends to an already compiled library.
-Distribution compilation settings are preserved.
+GNU also builds **MUMPS 5.7.3**, because Ubuntu's MUMPS lacks the external
+ordering backends. This is an explicit exception to GNU library reuse. Its
+`mumps/5.7.3` module is a symlink to `MPI/generic.lua`, whose GNU MUMPS path rule
+selects `/opt/gcc-<major>/openmpi-<major>/mumps/5.7.3` and prepends its library
+directory to `LD_LIBRARY_PATH`. Headers and compiler-specific Fortran modules
+also come from this prefix. Other GNU library modules keep their existing
+system paths. The old Ubuntu MUMPS module link is removed; Ubuntu's packages
+remain installed, recorded in `gnu-system.packages`.
 
 Applications must initialize MPI with `MPI_Init_thread` and check for
 `MPI_THREAD_MULTIPLE` when using the threaded PT-Scotch backend. Set
@@ -64,10 +75,11 @@ Fortran modules, MPI wrappers, and libraries from the same stack.
 ## Validation
 
 Installed tests solve a tridiagonal system with a known solution, on two MPI ranks,
-for all four arithmetic types with both static and shared MUMPS libraries. Intel
-tests explicitly select each of the five ordering backends and check `INFOG(7)`
-and `INFOG(32)` to detect fallback. GNU tests select its available PORD backend.
+for all four arithmetic types with both static and shared MUMPS libraries. All
+stacks explicitly select each of the five ordering backends and check `INFOG(7)`
+and `INFOG(32)` to detect fallback.
 Double-precision Fortran clients exercise both library variants. Whole-archive
-linking of all Intel static archives into one shared object checks PIC and missing
-symbols, and dynamic dependency checks reject accidental OpenMPI linking.
+linking of all static archives into one shared object checks PIC and missing
+symbols. Dynamic dependency checks confirm the selected MUMPS prefix and MPI
+implementation for each stack.
 These checks are targeted validation, not a full upstream test suite.
