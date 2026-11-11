@@ -171,6 +171,10 @@ Library builds and modules follow the profiles installed in the selected base;
 Run all build commands below from the **parent directory of `hofem-dev-docker/`**.
 Intel images require `linux/amd64`.
 
+The build pairs below work from a fresh clone without any pre-existing GREMA or
+HOFEM images. Run the commands in order: the first builds the toolchain base
+from Ubuntu, and the second adds the HOFEM libraries to that locally built base.
+
 ### All three stacks: `latest`
 
 Build the toolchain base, then add the HOFEM libraries:

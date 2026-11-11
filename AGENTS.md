@@ -15,7 +15,7 @@ From the repository root, when builds are authorized:
 - `docker run --rm grema-dev grema-smoke-test`: test the base.
 - `docker run --rm hofem-dev hofem-smoke-test`: test toolchains and libraries.
 
-The README documents migration using existing compiler layers and bind mounts. Do not describe unverified commands as tested.
+The README documents building the toolchain base before the library image and using bind mounts. Fresh builds must not depend on pre-existing GREMA/HOFEM images. Do not describe unverified commands as tested.
 
 ## Coding Style & Library Builds
 

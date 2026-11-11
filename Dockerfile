@@ -1,5 +1,4 @@
 # syntax=docker/dockerfile:1
-ARG TOOLCHAIN_IMAGE=hofem-dev:latest
 FROM ubuntu:24.04 AS gnu-dev
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -34,20 +33,6 @@ WORKDIR /workspace
 USER developer
 ENTRYPOINT ["/usr/local/bin/hofem-entrypoint"]
 CMD ["/bin/bash"]
-
-# Migration target: reuse installed compilers when rebuilding their layers is costly.
-# Pin TOOLCHAIN_IMAGE to an existing image ID when building this target.
-FROM ${TOOLCHAIN_IMAGE} AS reuse-toolchains
-USER root
-COPY modulefiles/ /usr/local/share/hofem/modulefiles/
-COPY docker/configure-modules.py /usr/local/sbin/hofem-configure-modules
-COPY docker/install-intel.sh /usr/local/sbin/hofem-install-intel
-COPY docker/prepare-base.sh /usr/local/sbin/grema-prepare-base
-COPY tests/toolchains.sh /usr/local/bin/grema-smoke-test
-RUN bash /usr/local/sbin/grema-prepare-base \
-    && chmod 755 /usr/local/bin/grema-smoke-test
-LABEL org.opencontainers.image.title="grema-dev"
-USER developer
 
 FROM gnu-dev AS intel-base
 USER root
