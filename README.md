@@ -4,6 +4,126 @@ Ubuntu 24.04 LTS environments for developing HOFEM, GREMA's electromagnetic
 solver using High Order Finite Elements. Application sources are maintained
 separately and shared with containers through a bind mount.
 
+## Requirements to build and run
+
+The host can use a different Linux distribution from the Ubuntu 24.04 environment
+inside the image. It must have a compatible kernel, container support enabled,
+and a working Docker Engine. The Intel stacks require an **x86-64/amd64 host**
+and compatible CPU instructions. Specifying `--platform linux/amd64` selects the
+image architecture; it does not by itself enable execution on an ARM host.
+
+| Requirement | Building images | Running an existing image |
+| --- | --- | --- |
+| Docker Engine and access to its daemon | Required; use a current BuildKit-capable installation with the Buildx plugin | Required |
+| Compose v2 (`docker compose`) | Optional; the build commands use Docker directly | Required only for the Compose workflow |
+| Project files | Complete repository, including the bundled archives under `docker/` | The image; Compose also needs `compose.yaml` and `docker/entrypoint.sh` in their original relative layout |
+| Network access | Ubuntu base image, Ubuntu/Intel package repositories, Intel signing key and any Dockerfile frontend downloads; numerical source archives are bundled | Needed to obtain an image unless supplied as a `docker save` archive; subsequent local launches can work offline |
+| Disk space | Image layers, compiler packages, build cache and temporary compilation files | Image layers, container changes and application outputs |
+| Memory and CPU | Enough for parallel compilation; `BUILD_JOBS` defaults to `2` for HOFEM libraries | Depends on the compiler/application workload and MPI process count |
+
+No measured minimum RAM or disk capacity is established for this project. Allow
+several tens of gigabytes for compiler images and additional space for build
+cache, multiple image variants and application files. Reducing `BUILD_JOBS`
+reduces concurrent compilation when memory is limited. Check space on the
+Docker storage filesystem, not just the workspace partition: rootful Docker
+commonly uses `/var/lib/docker`, and containerd-backed installations may also
+use `/var/lib/containerd`.
+
+Host compilers, Intel oneAPI, MPI, Lmod and numerical libraries are not required;
+they are installed inside the images. Building the HOFEM extension requires the
+selected GREMA base image first. An end user can instead import a supplied
+archive with `docker load -i /path/to/hofem-dev.tar` and use its existing tag.
+
+An administrator installs/configures the host runtime. The commands below assume
+the caller is authorized to use the rootful Docker daemon, through sudo or an
+administrator-approved Docker group membership. Docker group access grants
+root-level capabilities on the host. Running as `developer` or setting a container
+UID does not grant daemon access. For users who cannot receive that access, see
+[rootless Docker](README_rootless_docker.md) or [Podman](README_podman.md);
+their UID mapping and launch configuration differ from this rootful workflow.
+See [Docker post-installation guidance](https://docs.docker.com/engine/install/linux-postinstall/).
+
+### Debian and Ubuntu hosts
+
+Use one coherent package source: distribution packages or Docker CE from
+Docker's official repository. Have the administrator review existing runtime
+packages before switching sources. Example installations from distribution
+repositories are:
+
+```bash
+# Debian 13
+sudo apt update
+sudo apt install docker.io docker-cli docker-buildx docker-compose
+
+# Ubuntu 24.04, with the universe repository enabled
+sudo apt update
+sudo apt install docker.io docker-buildx docker-compose-v2
+```
+
+The Compose package name is distribution-specific: Debian 13's `docker-compose`
+provides v2; Debian 12's standard package provides legacy v1 and needs a separately
+provisioned v2 plugin for this README's Compose commands. Ubuntu's
+[`docker-compose-v2`](https://packages.ubuntu.com/noble/docker-compose-v2)
+provides the required plugin. Buildx is packaged as
+[`docker-buildx`](https://packages.debian.org/trixie/docker-buildx).
+
+As an alternative, configure the appropriate
+[Docker CE Debian repository](https://docs.docker.com/engine/install/debian/)
+or [Docker CE Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/),
+then install `docker-ce`, `docker-ce-cli`, `containerd.io`,
+`docker-buildx-plugin` and `docker-compose-plugin`. Use the repository matching
+the actual host distribution and release; an Ubuntu container base does not
+mean the host should use Ubuntu repositories.
+
+On a systemd host, the administrator can start and enable the system daemon with
+`sudo systemctl enable --now docker`. From the account that will build/run the
+images, check:
+
+```bash
+docker version
+docker info
+docker buildx version
+docker compose version
+```
+
+`docker version` must reach the server, not merely print a client version.
+Use sudo for daemon-dependent checks if that is the approved access method.
+These checks do not build or run a container.
+
+### RHEL-compatible hosts
+
+Use a Docker installation compatible with the actual distribution and release,
+following its administrator/vendor guidance. Docker publishes installation
+instructions for maintained [RHEL releases](https://docs.docker.com/engine/install/rhel/)
+and [CentOS Stream releases](https://docs.docker.com/engine/install/centos/);
+Rocky Linux and AlmaLinux deployments should use a site-approved compatible
+package source. CentOS 7 is a legacy platform outside the current Docker
+installation support matrix; archived packages and the image's compatibility
+require separate validation.
+
+Once the appropriate Docker CE repository is configured, the usual package
+installation and daemon startup commands are:
+
+```bash
+sudo dnf install docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+```
+
+Verify access using the same `docker version`, `docker info`, Buildx and Compose
+checks shown above. Some distributions provide `podman-docker`, which makes the
+`docker` command invoke Podman. For this workflow, confirm that the command
+connects to Docker Engine; use the separate Podman guide when choosing Podman.
+
+SELinux may require suitable labels on bind-mounted workspace directories and
+the live entrypoint script. For a dedicated workspace, Docker's `:Z` volume
+option is one possible private-label configuration; shared paths may require
+`:z` or administrator-managed labels. Relabeling changes host metadata, so apply
+it only to appropriate project paths. Do not relabel an entire home/system tree
+or disable SELinux to resolve a mount issue. The supplied Compose file does not
+automatically relabel its mounts. Rootful UID/GID matching still applies in
+addition to SELinux permissions.
+
 ## Images and tags
 
 `grema-dev` supplies development tools and compiler/MPI stacks. `hofem-dev`
