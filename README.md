@@ -76,8 +76,28 @@ the actual host distribution and release; an Ubuntu container base does not
 mean the host should use Ubuntu repositories.
 
 On a systemd host, the administrator can start and enable the system daemon with
-`sudo systemctl enable --now docker`. From the account that will build/run the
-images, check:
+`sudo systemctl enable --now docker`.
+
+To run this README's rootful Docker commands **without sudo**, the user must
+belong to the `docker` group. An administrator can add the account with:
+
+```bash
+sudo usermod -aG docker your_username
+```
+
+Replace `your_username` with the account that will build/run the images, then
+log out and log back in so the new membership takes effect. Verify it with
+`id -nG`; the output must include `docker`.
+
+**Docker group membership grants root-level access to the host**, because it
+allows controlling the rootful daemon, including mounting host filesystems and
+starting privileged containers. Running the image as a non-root user does not
+remove those host capabilities. Grant membership only to trusted accounts with
+administrator approval. If that access is prohibited, use sudo where authorized
+or the separate rootless Docker/Podman workflows; do not make the Docker socket
+world-writable.
+
+From the authorized account, check:
 
 ```bash
 docker version
